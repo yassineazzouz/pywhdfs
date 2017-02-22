@@ -1,0 +1,88 @@
+{
+  "type": "object",
+  "properties": {
+    "clusters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "auth_mechanism": {
+            "type": "string"
+          },
+          "mutual_auth": {
+            "type": "string"
+          },
+          "max_concurrency": {
+            "type": "integer"
+          },
+          "token": {
+            "type": "string"
+          },
+          "verify": {
+            "type": "boolean"
+          },
+          "truststore": {
+            "type": "string"
+          },
+          "nameservices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "urls": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "mounts": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "urls",
+                "mounts"
+              ]
+            }
+          }
+        },
+        "required": [
+          "name",
+          "nameservices"
+        ]
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "properties": {
+        "logging": {
+          "type": "object",
+          "properties": {
+            "disable": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string"
+            },
+            "level": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "level"
+          ]
+        }
+      }
+    }
+  },
+  "required": [
+    "clusters"
+  ]
+}
