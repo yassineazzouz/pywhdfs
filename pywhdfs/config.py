@@ -8,6 +8,7 @@ from functools import wraps
 from imp import load_source
 from logging.handlers import TimedRotatingFileHandler
 from tempfile import gettempdir
+from copy import deepcopy
 import logging as lg
 import os
 import os.path as osp
@@ -78,8 +79,9 @@ class WebHDFSConfig(object):
       :param kwargs: additional arguments can be used to overwrite or add some 
         parameters defined in the configuration file.
       """
-      
-      for cluster in self.config['clusters']:
+
+      config_copy = deepcopy(self.config)
+      for cluster in config_copy['clusters']:
         if cluster['name'] == cluster_name:
             # remove the name parameter from the 
             del cluster['name']
