@@ -867,6 +867,41 @@ class WebHDFSClient(object):
     _logger.debug("--- download finished in : %s seconds ---" % (time.time() - start_time))
     return local_path
 
+  def read_file(self, hdfs_path, offset=0, length=None, buffer_size=None, encoding=None):
+    _logger.info('Reading file %r.', hdfs_path)
+    res = self._api_request(method='GET', hdfs_path=hdfs_path, params={'op': 'OPEN', 'offset': offset, 'length': length, 'buffersize': buffer_size})
+    try:
+      res.encoding = encoding
+      return res.content
+    finally:
+      res.close()
+      _logger.debug('Closed response for reading file %r.', hdfs_path)
+
+  def read_stream(self, hdfs_path, offset=0, length=None, buffer_size=None, encoding=None, chunk_size=1024, delimiter=None):
+    """Stream a file from HDFS.
+       This function is a generator that returns chunks of data of chunk_size.
+    """
+    if delimiter:
+      if not encoding:
+        raise ValueError('Delimiter splitting requires an encoding.')
+      if chunk_size:
+        raise ValueError('Delimiter splitting incompatible with chunk size.')
+    _logger.info('Reading file %r.', hdfs_path)
+    res = self._api_request(method='GET', hdfs_path=hdfs_path, params={'op': 'OPEN', 'offset': offset, 'length': length, 'buffersize': buffer_size}, stream=True)
+    try:
+      res.encoding = encoding
+      if delimiter:
+        for chunk in res.iter_lines(delimiter=delimiter, decode_unicode=True):
+          if chunk:
+            yield chunk
+      else:
+        for chunk in res.iter_content(chunk_size=chunk_size, decode_unicode=True):
+          if chunk:
+            yield chunk
+    finally:
+      res.close()
+      _logger.debug('Closed response for reading file %r.', hdfs_path)
+
   @contextmanager
   def read(self, hdfs_path, offset=0, length=None, buffer_size=None,
     encoding=None, chunk_size=None, delimiter=None):
