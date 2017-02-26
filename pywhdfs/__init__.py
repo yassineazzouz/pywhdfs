@@ -6,6 +6,6 @@
 from .client import WebHDFSClient
 import logging as lg
 
-__version__ = '1.0.0'
+__version__ = '1.0.2'
 __author__  = 'Yassine Azzouz'
 __license__ = 'MIT'
