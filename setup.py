@@ -54,6 +54,7 @@ setup(
     'requests>=2.7.0',
     'jsonschema>2.0',
     'requests-kerberos>=0.7.0',
+    'pykerberos',
   ],
   entry_points={'console_scripts': 
      [ 'pywhdfs = pywhdfs.cmdtool:main' ]
