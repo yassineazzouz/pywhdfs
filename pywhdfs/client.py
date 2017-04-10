@@ -224,6 +224,9 @@ class WebHDFSClient(object):
     else:
       return response
 
+  def help(self):
+    help(self)
+    
   def content(self, hdfs_path, strict=True):
     """Get ContentSummary_ for a file or folder on HDFS.
     :param hdfs_path: Remote path.
@@ -356,25 +359,34 @@ class WebHDFSClient(object):
     _logger.info('Getting checksum for %r.', hdfs_path)
     return self._api_request(method='GET',hdfs_path=hdfs_path, params={'op': 'GETFILECHECKSUM'}).json()['FileChecksum']
 
-  def list(self, hdfs_path, status=False):
+  def list(self, hdfs_path, status=False, glob=False):
     """Return names of files contained in a remote folder.
     :param hdfs_path: Remote path to a directory. If `hdfs_path` doesn't exist
       or points to a normal file, an :class:`HdfsError` will be raised.
-    :param status: Also return each file's corresponding FileStatus_.
+    :glob: Whether the path should be considered a glob expressions
+    :param status: Also return each file's corresponding FileStatus.
     """
     _logger.info('Listing %r.', hdfs_path)
     hdfs_path = self.resolvepath(hdfs_path)
-    statuses = self._api_request(method='GET', hdfs_path=hdfs_path, params={'op': 'LISTSTATUS'}).json()['FileStatuses']['FileStatus']
-    if len(statuses) == 1 and (
-      not statuses[0]['pathSuffix'] or self.status(hdfs_path)['type'] == 'FILE'
-      # HttpFS behaves incorrectly here, we sometimes need an extra call to
-      # make sure we always identify if we are dealing with a file.
-    ):
-      raise HdfsError('%r is not a directory.', hdfs_path)
-    if status:
-      return [(s['pathSuffix'], s) for s in statuses]
+
+    if not glob:
+      statuses = self._api_request(method='GET', hdfs_path=hdfs_path, params={'op': 'LISTSTATUS'}).json()['FileStatuses']['FileStatus']
+      if len(statuses) == 1 and (
+        not statuses[0]['pathSuffix'] or self.status(hdfs_path)['type'] == 'FILE'
+        # HttpFS behaves incorrectly here, we sometimes need an extra call to
+        # make sure we always identify if we are dealing with a file.
+      ):
+        raise HdfsError('%r is not a directory.', hdfs_path)
+      if status:
+        return [(s['pathSuffix'], s) for s in statuses]
+      else:
+        return [s['pathSuffix'] for s in statuses]
     else:
-      return [s['pathSuffix'] for s in statuses]
+      files = [ hdfs_file for hdfs_file in hglob.iglob(self, hdfs_path) ]
+      if status:
+        return [(f, self.status(f)) for f in files]
+      else:
+        return files
 
   def walk(self, hdfs_path, depth=0, status=False):
     """Depth-first walk of remote filesystem.
