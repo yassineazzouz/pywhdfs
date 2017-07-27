@@ -17,6 +17,7 @@ import time
 import stat
 import grp
 import pwd
+import sys
 import posixpath as psp
 import os.path as osp
 
