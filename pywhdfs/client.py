@@ -9,6 +9,7 @@ from multiprocessing.pool import ThreadPool
 from threading import Lock, Semaphore
 from subprocess import call
 from getpass import getuser
+from shutil import move, rmtree
 import requests as rq
 import logging as lg
 import itertools as it
@@ -805,7 +806,7 @@ class WebHDFSClient(object):
       else:
         # local destination path does not exist
         if not osp.exists(osp.dirname(local_path)):
-          raise HdfsError('Parent directory of %r does not exist.', local_base_path)
+          raise HdfsError('Parent directory of %r does not exist.', local_path)
         local_base_path =  local_path
         temp_path = local_base_path
         download_tuple = dict({ 'local_path' : local_base_path, 'hdfs_path' : download, 'temp_path' : local_base_path})
@@ -919,7 +920,7 @@ class WebHDFSClient(object):
 
   @contextmanager
   def read(self, hdfs_path, offset=0, length=None, buffer_size=None,
-    encoding=None, chunk_size=None, delimiter=None):
+    encoding=None, chunk_size=None, delimiter=None, progress=None):
     """Read a file from HDFS.
     :param hdfs_path: HDFS path.
     :param offset: Starting byte position.
@@ -942,6 +943,8 @@ class WebHDFSClient(object):
         content = reader.read()
     This ensures that connections are always properly closed.
     """
+    if progress and not chunk_size:
+      raise ValueError('Progress callback requires a positive chunk size.')
     if delimiter:
       if not encoding:
         raise ValueError('Delimiter splitting requires an encoding.')
@@ -958,7 +961,19 @@ class WebHDFSClient(object):
           data = res.iter_lines(delimiter=delimiter, decode_unicode=True)
         else:
           data = res.iter_content(chunk_size=chunk_size, decode_unicode=True)
-        yield data
+        if progress:
+          def reader(_hdfs_path, _progress):
+            """Generator that tracks progress."""
+            nbytes = 0
+            for chunk in data:
+              nbytes += len(chunk)
+              _progress(_hdfs_path, nbytes)
+              yield chunk
+            _progress(_hdfs_path, -1)
+
+          yield reader(hdfs_path, progress)
+        else:
+          yield data
     finally:
       res.close()
       _logger.debug('Closed response for reading file %r.', hdfs_path)
