@@ -20,6 +20,7 @@ import stat
 import grp
 import pwd
 import sys
+import os
 import posixpath as psp
 import os.path as osp
 
