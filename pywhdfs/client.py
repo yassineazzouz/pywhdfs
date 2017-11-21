@@ -6,7 +6,7 @@ from .utils import hglob
 from .utils.utils import *
 from contextlib import contextmanager
 from multiprocessing.pool import ThreadPool
-from threading import Lock, Semaphore
+from threading import Lock, Semaphore, BoundedSemaphore
 from subprocess import call
 from getpass import getuser
 from shutil import move, rmtree
@@ -23,6 +23,7 @@ import sys
 import os
 import posixpath as psp
 import os.path as osp
+from datetime import datetime
 
 try:
     # Python 3
@@ -42,7 +43,6 @@ _logger = lg.getLogger(__name__)
 
 webhdfs_prefix = '/webhdfs/v1'
 AUTH_MECHANISMS = ['NONE', 'GSSAPI', 'TOKEN']
-_delay = 0.001
 
 class WebHDFSClient(object):
 
@@ -75,8 +75,8 @@ class WebHDFSClient(object):
            self,
            nameservices,
            auth_mechanism="NONE",
-           mutual_auth='OPTIONAL',
-           max_concurrency=10,
+           mutual_auth='DISABLED',
+           max_concurrency=-1,
            user=None,
            token=None,
            root=None,
@@ -95,6 +95,12 @@ class WebHDFSClient(object):
     self.root = root
     self._session = rq.Session()
 
+    self.max_concurrency = max_concurrency
+    if self.max_concurrency > 0:
+      self._lock = Lock()
+      self._sem = Semaphore(int(self.max_concurrency))
+
+
     if auth_mechanism == "NONE":
       user = user or getuser()
       if not self._session.params:
@@ -107,9 +113,6 @@ class WebHDFSClient(object):
     else:
       if KRB_LIB_IMPORT == False:
         raise ImportError("Missing requests_kerberos library")
-      self._lock = Lock()
-      self._sem = Semaphore(int(max_concurrency))
-      self._timestamp = time.time() - _delay
       if mutual_auth:
         try:
           _mutual_auth = getattr(requests_kerberos, mutual_auth)
@@ -205,22 +208,26 @@ class WebHDFSClient(object):
         _logger.debug('Ignoring Remote Exception for %s request on url %s : %s', response.request.method ,response.url, str(message))
         return response
 
-    if 'auth' in rqargs:
+    if self.max_concurrency > 0:
+      # Control the number of parallel requests
       with self._sem:
-        with self._lock:
-          delay = self._timestamp + _delay - time.time()
-          if delay > 0:
-            time.sleep(delay) # Avoid replay errors.
-          self._timestamp = time.time()
-
-    response = self._session.request(
+        response = self._session.request(
+          method=method,
+          url=url,
+          timeout=self._timeout,
+          verify=self._verify,
+          headers={'content-type': 'application/octet-stream'},
+          **rqargs
+        )
+    else:
+      response = self._session.request(
         method=method,
         url=url,
         timeout=self._timeout,
         verify=self._verify,
         headers={'content-type': 'application/octet-stream'},
         **rqargs
-    )
+      )
     _logger.debug('%s request on url %s returned with status %s', method ,url, response.status_code)
 
     if not response:
@@ -1147,10 +1154,10 @@ class WebHDFSClient(object):
 
       if not skip:
         if osp.dirname(_tmp_path) not in dircache:
+          _logger.info('Parent directory %r does not exist, creating recursively.', osp.dirname(_tmp_path))
           # Prevent race condition when creating directories
           with lock:
             if self.status(osp.dirname(_tmp_path), strict=False) is None:
-              _logger.debug('Parent directory %r does not exist, creating recursively.', osp.dirname(_tmp_path))
               curpath = ''
               root_dir = None
               for dirname in osp.dirname(_tmp_path).strip('/').split('/'):
@@ -1163,6 +1170,10 @@ class WebHDFSClient(object):
                   if preserve:
                     curr_local_path=osp.realpath( osp.join( _local_path,osp.relpath(curpath,_tmp_path)) )
                     _preserve(curr_local_path,curpath)
+                else:
+                  dircache.append(curpath)
+            else:
+              dircache.append(osp.dirname(_tmp_path))
 
         _logger.info('Uploading %r to %r.', _local_path, _tmp_path)
 
@@ -1316,22 +1327,17 @@ class WebHDFSClient(object):
 
     # Transfer summary
     status = {
-      'Source Path'      : src_path,
-      'Destination Path' : dst_path,
+      'Source Path'      : local_path,
+      'Destination Path' : hdfs_path,
       'Start Time'       : datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M:%S'),
       'End Time'         : datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S'),
       'Duration'         : end_time - start_time,
       'Outcome'          : 'Successful',
       'Files Expected'   : 0,
-      'Size Expected'    : 0,
       'Files Copied'     : 0,
-      'Size Copied'      : 0,
       'Files Failed'     : 0,
-      'Size Failed'      : 0,
       'Files Deleted'    : 0,
-      'Size Deleted'     : 0,
       'Files Skipped'    : 0,
-      'Size Skipped'     : 0,
     }
 
     for result in results:
