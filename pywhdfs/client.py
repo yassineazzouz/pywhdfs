@@ -95,7 +95,7 @@ class WebHDFSClient(object):
     self.root = root
     self._session = rq.Session()
 
-    self.max_concurrency = max_concurrency
+    self.max_concurrency = int(max_concurrency)
     if self.max_concurrency > 0:
       self._lock = Lock()
       self._sem = Semaphore(int(self.max_concurrency))
