@@ -1302,6 +1302,25 @@ class WebHDFSClient(object):
       else:
         raise HdfsError('Local path %r does not exist.', upload_tuple['local_path'])
 
+    _logger.info("--- scan finished in %s seconds, uploading %s files ---" % (time.time() - start_time, len(fpath_tuples)))
+
+    if len(fpath_tuples) == 0:
+      end_time = time.time()
+      _logger.warn("could not find any file to upload")
+      return {
+        'Source Path'      : local_path,
+        'Destination Path' : hdfs_path,
+        'Start Time'       : datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M:%S'),
+        'End Time'         : datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S'),
+        'Duration'         : end_time - start_time,
+        'Outcome'          : 'Successful',
+        'Files Expected'   : 0,
+        'Files Copied'     : 0,
+        'Files Failed'     : 0,
+        'Files Deleted'    : 0,
+        'Files Skipped'    : 0,
+      }
+
     # Finally, we upload all files (optionally, in parallel).
     if n_threads <= 0:
       n_threads = len(fpath_tuples)
