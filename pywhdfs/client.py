@@ -182,52 +182,42 @@ class WebHDFSClient(object):
     _logger.debug('Attempting %s request on url %s with parameters %s', method ,url, rqargs)
 
     def _on_fail(response, strict=True):
-      if response.status_code == httplib.UNAUTHORIZED:
-        _logger.error('Authentication Failure.')
-        raise HdfsError('Authentication failure. Check your credentials.')
-
-      if response.status_code == httplib.REQUEST_TIMEOUT or response.status_code == httplib.GATEWAY_TIMEOUT:
-        try:
-          _msg = response.json()['RemoteException']['message']
-        except:
-          _msg = response.content
-          pass
-        raise TimeoutError("TimeoutException : %r",_msg)
-
-      if response.status_code == httplib.FORBIDDEN:
-        try:
-          exception = response.json()["RemoteException"]["exception"]
-        except:
-          exception = "ForbiddenException"
-          pass
-        if exception == "SecurityException" and self.auth_mechanism == "TOKEN":
-          _logger.warn('Delegation token expired')
-          try:
-            _msg = response.json()['RemoteException']['message']
-          except:
-            _msg = response.content
-            pass
-          if "InvalidToken" in _msg:
-            raise InvalidTokenError("InvalidTokenException : %r",_msg)   
-          # else it is something else    
-        elif exception == "StandbyException":
-          _logger.info('Request returned Standby Exception on url %s.', response.url)
-          try:
-            _msg = response.json()['RemoteException']['message']
-          except:
-            _msg = response.content
-            pass
-          raise StandbyError("StandbyException : %r",_msg)
-        #else: we certainly know that it's a 403 error but not standby, just keep going
 
       try:
         message = response.json()['RemoteException']['message']
       except ValueError:
         # No clear one thing to display, display entire message content
         message = response.content
+      try:
+        exception = response.json()["RemoteException"]["exception"]
+      except ValueError:
+        exception = ""
+
+      if response.status_code == httplib.UNAUTHORIZED:
+        _logger.error('Authentication Failure.')
+        raise HdfsError('Authentication failure. Check your credentials.')
+
+      if response.status_code == httplib.REQUEST_TIMEOUT or response.status_code == httplib.GATEWAY_TIMEOUT:
+        raise TimeoutError("TimeoutException : %r",message)
+
+      if response.status_code == httplib.FORBIDDEN:
+        if exception == "SecurityException":
+          _logger.warn('Delegation token expired')
+          if "InvalidToken" in message:
+            raise InvalidTokenError("InvalidTokenException : %r",message)   
+          # else it is something else    
+        elif exception == "StandbyException":
+          _logger.info('Request returned Standby Exception on url %s.', response.url)
+          raise StandbyError("StandbyException : %r",message)
+        else:
+          # resolve the exception based on message, if the exception
+          # is unknown
+          if "SocketTimeout" in str(message):
+            raise TimeoutError("TimeoutException : %r",message)
 
       if strict:
-        _logger.error('%s request on url %s returned with status %s, Remote Exception : %s', response.request.method ,response.url, response.status_code, str(message))
+        _logger.error('%s request on url %s returned with status %s, Remote Exception : %s, Message: %s', response.request.method ,response.url, response.status_code, str(exception), str(message))
+        _logger.error('Received response : %s', str(response.content))
         raise HdfsError(message)
       else:
         _logger.debug('Ignoring Remote Exception for %s request on url %s : %s', response.request.method ,response.url, str(message))
