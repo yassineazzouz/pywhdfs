@@ -33,6 +33,7 @@ except ImportError:  # pragma: no cover
     import httplib
 
 try:
+    import krbV
     import requests_kerberos
     from requests_kerberos import HTTPKerberosAuth
     KRB_LIB_IMPORT=True
@@ -42,7 +43,19 @@ except ImportError:
 _logger = lg.getLogger(__name__)
 
 webhdfs_prefix = '/webhdfs/v1'
+
 AUTH_MECHANISMS = ['NONE', 'GSSAPI', 'TOKEN']
+
+def create_client(auth_mechanism, **kwargs):
+  if auth_mechanism == "NONE":
+    return InsecureWebHDFSClient(**kwargs)
+  elif auth_mechanism == "GSSAPI":
+    return KrbWebHDFSClient(**kwargs)
+  elif auth_mechanism == "TOKEN":
+    return TokenWebHDFSClient(**kwargs)
+  else:
+    raise NotSupportedError(
+      'Unsupported authentication mechanism: {0}'.format(auth_mechanism))
 
 class WebHDFSClient(object):
 
@@ -74,59 +87,37 @@ class WebHDFSClient(object):
   def __init__(
            self,
            nameservices,
-           auth_mechanism="NONE",
-           mutual_auth='DISABLED',
            max_concurrency=-1,
-           user=None,
-           token=None,
            root=None,
            proxy=None,
            timeout=None,
            verify=False,
-           truststore=None
+           truststore=None,
+           session=None
        ):
-
-    if auth_mechanism not in AUTH_MECHANISMS:
-      raise NotSupportedError(
-          'Unsupported authentication mechanism: {0}'.format(auth_mechanism))
 
     # Comma separed list of namenodes urls
     self.host_list = SyncHostsList(nameservices)
     self.root = root
-    self._session = rq.Session()
+
+    self._session = session or rq.Session()
+    # Use a bigger connection pool due to the big number of concurrent threads 
+    adapter = rq.adapters.HTTPAdapter(max_retries=5, pool_connections=100, pool_maxsize=100)
+    self._session.mount('http://', adapter)
+    self._session.mount('https://', adapter)
 
     self.max_concurrency = int(max_concurrency)
     if self.max_concurrency > 0:
       self._lock = Lock()
       self._sem = Semaphore(int(self.max_concurrency))
 
-
-    if auth_mechanism == "NONE":
-      user = user or getuser()
-      if not self._session.params:
-        self._session.params = {}
-      self._session.params['user.name'] = user
-    elif auth_mechanism == "TOKEN":
-      if not self._session.params:
-        self._session.params = {}
-      self._session.params['delegation'] = token
-    else:
-      if KRB_LIB_IMPORT == False:
-        raise ImportError("Missing requests_kerberos library")
-      if mutual_auth:
-        try:
-          _mutual_auth = getattr(requests_kerberos, mutual_auth)
-        except AttributeError:
-          raise HdfsError('Invalid mutual authentication type: %r', mutual_auth)
-      else:
-        _mutual_auth = mutual_auth
-      self._session.auth = HTTPKerberosAuth(_mutual_auth)
-
     if proxy:
       if not self._session.params:
         self._session.params = {}
       self._session.params['doas'] = proxy
+
     self._timeout = timeout
+    self.proxy = proxy
 
     if verify and truststore is not None:
       self._verify = truststore
@@ -142,8 +133,11 @@ class WebHDFSClient(object):
   def _api_request(self, method, params, hdfs_path, data=None, strict=True, **rqargs):
     """Wrapper function."""
     max_attemps = self.host_list.get_host_count(hdfs_path)
-    attempt = 1
-    while attempt <= max_attemps:
+    max_retries = 5;
+    attempt = 0
+    retries = 0;
+
+    while True:
       host = self.host_list.get_active_host(hdfs_path)
       url = '%s%s%s' % (
         host.rstrip('/'),
@@ -160,12 +154,24 @@ class WebHDFSClient(object):
           **rqargs
         )
         return response
+      ## Handle stanby failover
       except StandbyError, e:
-        _logger.info('Namenode %s in standby mode. %s', host, str(e))
+        _logger.warn('Namenode %s in standby mode. %s', host, str(e))
         self.host_list.switch_active_host(host,hdfs_path)
         attempt += 1
-        pass
-    raise StandbyError('Could not find any active namenode.')
+        if attempt >= max_attemps:
+          raise HdfsError('Could not find any active namenode.')
+        else:
+          pass
+      except TimeoutError, e:
+        _logger.error('Request timeout %s, attempt %s', str(e), retries)
+        retries += 1
+        if retries >= max_retries:
+          raise HdfsError('Exceeded maximum number of retries afeter %s attemps, failing.')
+        else:
+          pass
+
+    raise HdfsError('Inexpected Process End.')
 
   '''
     Generic Request handler, do not implement the failover controller for HA here
@@ -180,13 +186,31 @@ class WebHDFSClient(object):
         _logger.error('Authentication Failure.')
         raise HdfsError('Authentication failure. Check your credentials.')
 
+      if response.status_code == httplib.REQUEST_TIMEOUT or response.status_code == httplib.GATEWAY_TIMEOUT:
+        try:
+          _msg = response.json()['RemoteException']['message']
+        except:
+          _msg = response.content
+          pass
+        raise TimeoutError("TimeoutException : %r",_msg)
+
       if response.status_code == httplib.FORBIDDEN:
         try:
           exception = response.json()["RemoteException"]["exception"]
         except:
           exception = "ForbiddenException"
           pass
-        if exception == "StandbyException":
+        if exception == "SecurityException" and self.auth_mechanism == "TOKEN":
+          _logger.warn('Delegation token expired')
+          try:
+            _msg = response.json()['RemoteException']['message']
+          except:
+            _msg = response.content
+            pass
+          if "InvalidToken" in _msg:
+            raise InvalidTokenError("InvalidTokenException : %r",_msg)   
+          # else it is something else    
+        elif exception == "StandbyException":
           _logger.info('Request returned Standby Exception on url %s.', response.url)
           try:
             _msg = response.json()['RemoteException']['message']
@@ -195,6 +219,7 @@ class WebHDFSClient(object):
             pass
           raise StandbyError("StandbyException : %r",_msg)
         #else: we certainly know that it's a 403 error but not standby, just keep going
+
       try:
         message = response.json()['RemoteException']['message']
       except ValueError:
@@ -202,7 +227,7 @@ class WebHDFSClient(object):
         message = response.content
 
       if strict:
-        _logger.error('%s request on url %s returned with Remote Exception : %s', response.request.method ,response.url, str(message))
+        _logger.error('%s request on url %s returned with status %s, Remote Exception : %s', response.request.method ,response.url, response.status_code, str(message))
         raise HdfsError(message)
       else:
         _logger.debug('Ignoring Remote Exception for %s request on url %s : %s', response.request.method ,response.url, str(message))
@@ -237,7 +262,16 @@ class WebHDFSClient(object):
 
   def help(self):
     help(self)
-    
+
+  def get_current_user(self):
+      if self.proxy:
+        return self.proxy
+      else:
+        return get_authenticated_user()
+
+  def get_authenticated_user(self):
+      return getuser()  
+
   def content(self, hdfs_path, strict=True):
     """Get ContentSummary_ for a file or folder on HDFS.
     :param hdfs_path: Remote path.
@@ -1420,6 +1454,132 @@ class WebHDFSClient(object):
             except Exception, e:
                 raise HdfsError(str(e))
         return True
+
+
+class InsecureWebHDFSClient(WebHDFSClient):
+
+  def __init__(self, nameservices, user=None, **kwargs):
+    self.user = user or getuser()
+    session = kwargs.setdefault('session', rq.Session())
+    if not session.params:
+      session.params = {}
+    session.params['user.name'] = user
+    super(InsecureWebHDFSClient, self).__init__(nameservices, **kwargs)
+
+  def get_authenticated_user(self):
+      return self.user
+
+class KrbWebHDFSClient(WebHDFSClient):
+
+  def __init__(self, nameservices, mutual_auth='DISABLED', **kwargs):
+    session = kwargs.setdefault('session', rq.Session())
+    if KRB_LIB_IMPORT == False:
+        raise ImportError("Missing requests_kerberos library")
+    if mutual_auth:
+        try:
+          _mutual_auth = getattr(requests_kerberos, mutual_auth)
+        except AttributeError:
+          raise HdfsError('Invalid mutual authentication type: %r', mutual_auth)
+    else:
+        _mutual_auth = mutual_auth
+    session.auth = HTTPKerberosAuth(_mutual_auth)
+
+    # get the authenticated user
+    ctx = krbV.default_context()
+    cc = ctx.default_ccache()
+    try:
+      self.principal = cc.principal().name
+    except krbV.Krb5Error, e:
+      raise HdfsError('Could not find any valid ticket in cache, %s', e)
+
+    super(KrbWebHDFSClient, self).__init__(nameservices, **kwargs)
+
+  def get_authenticated_user(self):
+      # get the authenticated user
+      return self.principal
+
+class TokenWebHDFSClient(WebHDFSClient):
+
+  def __init__(self, nameservices, token=None, mutual_auth='DISABLED', **kwargs):
+      session = kwargs.setdefault('session', rq.Session())
+      if not session.params:
+        session.params = {}
+      # try to create a renewer
+      try:
+        self.renewer = KrbWebHDFSClient( nameservices=nameservices, mutual_auth=mutual_auth, **kwargs)
+      except HdfsError:
+        _logger.warn('Could not create a token renewer, token will not be renewed.')
+        self.renewer = None
+
+      if token:
+        self.token = token
+      else:
+        # try to create a token
+        try:
+          self.token = self.renewer.getDelegationToken(renewer=self.renewer.get_authenticated_user())['urlString']
+        except HdfsError:
+          _logger.error('Could not create a delegation token.')
+          raise
+      session.params['delegation'] = self.token
+
+      super(TokenWebHDFSClient, self).__init__(nameservices, **kwargs)
+
+  def _api_request(self, method, params, hdfs_path, data=None, strict=True, **rqargs):
+    """Wrapper function."""
+    max_attemps = self.host_list.get_host_count(hdfs_path)
+    attempt = 0
+    renewed = False;
+
+    while True:
+      host = self.host_list.get_active_host(hdfs_path)
+      url = '%s%s%s' % (
+        host.rstrip('/'),
+        webhdfs_prefix,
+        self.resolvepath(hdfs_path),
+      )
+      try:
+        response = self._request(
+          method=method,
+          url=url,
+          strict=strict,
+          data=data,
+          params=params,
+          **rqargs
+        )
+        return response
+      ## Handle stanby failover
+      except StandbyError, e:
+        _logger.warn('Namenode %s in standby mode. %s', host, str(e))
+        self.host_list.switch_active_host(host,hdfs_path)
+        attempt += 1
+        if attempt >= max_attemps:
+          raise HdfsError('Could not find any active namenode.')
+        else:
+          pass
+      except TimeoutError, e:
+        _logger.error('Request timeout %s, attempt %s', str(e), retries)
+        retries += 1
+        if retries >= max_retries:
+          raise HdfsError('Exceeded maximum number of retries afeter %s attemps, failing.')
+        else:
+          pass
+      except InvalidTokenError, e:
+        if self.renewer:
+          if renewed == True:
+            raise HdfsError('Could not renew Delegation Token ' % e)
+          try:
+            self.renewer.renewDelegationToken(token=self.token)
+            renewed = True
+          except Exception, e2:
+            raise HdfsError('Could not renew Delegation Token ' % e2)
+        else:
+          raise e
+
+    raise HdfsError('Inexpected Process End.')
+
+    def get_authenticated_user(self):
+      # There is no way to fetch who is the authenticated user with token.
+      return None
 
 # Helpers
 # -------

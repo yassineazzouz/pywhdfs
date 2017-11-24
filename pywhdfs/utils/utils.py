@@ -33,6 +33,26 @@ class StandbyError(HdfsError):
   def __init__(self, message, *args):
     super(StandbyError, self).__init__(message % args if args else message)
 
+class InvalidTokenError(HdfsError):
+  """InvalidToken error class, is a subclass of HdfsError thrown when the authentication token is invalid.
+
+  :param message: Error message.
+  :param args: optional Message formatting arguments.
+
+  """
+  def __init__(self, message, *args):
+    super(InvalidTokenError, self).__init__(message % args if args else message)
+
+class TimeoutError(HdfsError):
+  """TimeoutError error class, is a subclass of HdfsError thrown when the server or client timeout.
+
+  :param message: Error message.
+  :param args: optional Message formatting arguments.
+
+  """
+  def __init__(self, message, *args):
+    super(TimeoutError, self).__init__(message % args if args else message)
+
 class FederationError(HdfsError):
   """Federation error class, is a subclass of HdfsError thrown when not suitable mount point is found.
 
