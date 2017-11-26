@@ -4,7 +4,7 @@
 """pywebhdfs: a command line interface for WEb HDFS.
 
 Usage:
-  pywebhdfs [-c CLUSTER] [-v...]
+  pywebhdfs [-c CLUSTER] [--conf=CONFIGURATION] [-v...]
   pywebhdfs (-V | -h)
 
 Options:
@@ -13,7 +13,8 @@ Options:
   -V --version                  Show version and exit.
   -h --help                     Show help and exit.
   -c CLUSTER --cluster=CLUSTER  Cluster configuration to connect to.
-
+  --conf=CONFIGURATION          pywhdfs configuration file to use. Defauls to ~/.webhdfs.cfg and could
+                                be set using the environement variable WEBHDFS_CONFIG.
 Examples:
   pywebhdfs -a prod
 
@@ -69,7 +70,7 @@ def configure_client(args):
   stream_handler.setFormatter(lg.Formatter(fmt))
   logger.addHandler(stream_handler)
 
-  config = WebHDFSConfig()
+  config = WebHDFSConfig(args['--conf'])
 
   # configure file logging if applicable
   handler = config.get_log_handler()

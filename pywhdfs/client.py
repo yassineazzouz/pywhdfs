@@ -44,7 +44,7 @@ _logger = lg.getLogger(__name__)
 
 webhdfs_prefix = '/webhdfs/v1'
 
-AUTH_MECHANISMS = ['NONE', 'GSSAPI', 'TOKEN']
+AUTH_MECHANISMS = ['NONE', 'GSSAPI', 'TOKEN', 'TKN_GSSAPI']
 
 def create_client(auth_mechanism, **kwargs):
   if auth_mechanism == "NONE":
@@ -53,12 +53,13 @@ def create_client(auth_mechanism, **kwargs):
     return KrbWebHDFSClient(**kwargs)
   elif auth_mechanism == "TOKEN":
     return TokenWebHDFSClient(**kwargs)
+  elif auth_mechanism == "TKN_GSSAPI":
+    return KrbTokenWebHDFSClient(**kwargs)
   else:
     raise NotSupportedError(
       'Unsupported authentication mechanism: {0}'.format(auth_mechanism))
 
 class WebHDFSClient(object):
-
   """Web HDFS client.
 
   :param nameservices: List of dictionaries specifying the namenodes to connect to, each dict should be
@@ -81,13 +82,13 @@ class WebHDFSClient(object):
     details.
   :param verify: If the Namenode certificate should be verified or not when using SSL
      Could be a boolean True/False or a path a Truststore file.
-
   """
 
   def __init__(
            self,
            nameservices,
            max_concurrency=-1,
+           pool_connections=100,
            root=None,
            proxy=None,
            timeout=None,
@@ -102,7 +103,7 @@ class WebHDFSClient(object):
 
     self._session = session or rq.Session()
     # Use a bigger connection pool due to the big number of concurrent threads 
-    adapter = rq.adapters.HTTPAdapter(max_retries=5, pool_connections=100, pool_maxsize=100)
+    adapter = rq.adapters.HTTPAdapter(max_retries=5, pool_connections=pool_connections, pool_maxsize=pool_connections)
     self._session.mount('http://', adapter)
     self._session.mount('https://', adapter)
 
@@ -133,9 +134,7 @@ class WebHDFSClient(object):
   def _api_request(self, method, params, hdfs_path, data=None, strict=True, **rqargs):
     """Wrapper function."""
     max_attemps = self.host_list.get_host_count(hdfs_path)
-    max_retries = 5;
     attempt = 0
-    retries = 0;
 
     while True:
       host = self.host_list.get_active_host(hdfs_path)
@@ -161,13 +160,6 @@ class WebHDFSClient(object):
         attempt += 1
         if attempt >= max_attemps:
           raise HdfsError('Could not find any active namenode.')
-        else:
-          pass
-      except TimeoutError, e:
-        _logger.error('Request timeout %s, attempt %s', str(e), retries)
-        retries += 1
-        if retries >= max_retries:
-          raise HdfsError('Exceeded maximum number of retries afeter %s attemps, failing.')
         else:
           pass
 
@@ -223,9 +215,21 @@ class WebHDFSClient(object):
         _logger.debug('Ignoring Remote Exception for %s request on url %s : %s', response.request.method ,response.url, str(message))
         return response
 
-    if self.max_concurrency > 0:
-      # Control the number of parallel requests
-      with self._sem:
+    max_retries = 5
+    retries = 0
+    while True:
+      if self.max_concurrency > 0:
+        # Control the number of parallel requests
+        with self._sem:
+          response = self._session.request(
+            method=method,
+            url=url,
+            timeout=self._timeout,
+            verify=self._verify,
+            headers={'content-type': 'application/octet-stream'},
+            **rqargs
+          )
+      else:
         response = self._session.request(
           method=method,
           url=url,
@@ -234,21 +238,21 @@ class WebHDFSClient(object):
           headers={'content-type': 'application/octet-stream'},
           **rqargs
         )
-    else:
-      response = self._session.request(
-        method=method,
-        url=url,
-        timeout=self._timeout,
-        verify=self._verify,
-        headers={'content-type': 'application/octet-stream'},
-        **rqargs
-      )
-    _logger.debug('%s request on url %s returned with status %s', method ,url, response.status_code)
 
-    if not response:
-      return _on_fail(response=response,strict=strict)
-    else:
-      return response
+      _logger.debug('%s request on url %s returned with status %s', method ,url, response.status_code)     
+      # returns True if status_code is less than 400
+      if not response:
+        try:
+          return _on_fail(response=response,strict=strict)
+        except TimeoutError, e:
+          _logger.error('Request timeout %s, attempt %s of %s', str(e), retries, max_retries)
+          retries += 1
+          if retries >= max_retries:
+            raise HdfsError('Exceeded maximum number of retries afeter %s attemps, failing.')
+          else:
+            pass
+      else:
+        return response
 
   def help(self):
     help(self)
@@ -1490,35 +1494,50 @@ class KrbWebHDFSClient(WebHDFSClient):
 
 class TokenWebHDFSClient(WebHDFSClient):
 
-  def __init__(self, nameservices, token=None, mutual_auth='DISABLED', **kwargs):
+  def __init__(self, nameservices, token, **kwargs):
+      session = kwargs.setdefault('session', rq.Session())
+      if not session.params:
+        session.params = {}
+      session.params['delegation'] = token
+      super(TokenWebHDFSClient, self).__init__(nameservices, **kwargs)
+
+  def get_authenticated_user(self):
+      # There is no way to fetch who is the authenticated user with token.
+      return None
+
+class KrbTokenWebHDFSClient(WebHDFSClient):
+
+  def __init__(self, nameservices, mutual_auth='DISABLED', **kwargs):
       session = kwargs.setdefault('session', rq.Session())
       if not session.params:
         session.params = {}
       # try to create a renewer
       try:
         self.renewer = KrbWebHDFSClient( nameservices=nameservices, mutual_auth=mutual_auth, **kwargs)
-      except HdfsError:
-        _logger.warn('Could not create a token renewer, token will not be renewed.')
-        self.renewer = None
-
-      if token:
-        self.token = token
-      else:
-        # try to create a token
-        try:
-          self.token = self.renewer.getDelegationToken(renewer=self.renewer.get_authenticated_user())['urlString']
-        except HdfsError:
-          _logger.error('Could not create a delegation token.')
-          raise
+      except HdfsError, e:
+        _logger.error('Could not create a token renewer: %s',str(e))
+        raise e
+      # try to create a token
+      try:
+        _logger.info('Create delegation token, for user %s', self.renewer.get_authenticated_user())
+        self.token = self.renewer.getDelegationToken(renewer=self.renewer.get_authenticated_user())['urlString']
+      except HdfsError, e:
+        _logger.error('Could not create a delegation token, %s', str(e))
+        raise e
       session.params['delegation'] = self.token
+      super(KrbTokenWebHDFSClient, self).__init__(nameservices, **kwargs)
 
-      super(TokenWebHDFSClient, self).__init__(nameservices, **kwargs)
+  def __del__(self):
+    try:
+      _logger.info('Cleanup created delegation token.')
+      self.renewer.cancelDelegationToken(token=self.token)
+    except HdfsError, e:
+      _logger.error('Could not cancel delegation token : %s', str(e))
 
   def _api_request(self, method, params, hdfs_path, data=None, strict=True, **rqargs):
     """Wrapper function."""
     max_attemps = self.host_list.get_host_count(hdfs_path)
     attempt = 0
-    renewed = False;
 
     while True:
       host = self.host_list.get_active_host(hdfs_path)
@@ -1546,13 +1565,6 @@ class TokenWebHDFSClient(WebHDFSClient):
           raise HdfsError('Could not find any active namenode.')
         else:
           pass
-      except TimeoutError, e:
-        _logger.error('Request timeout %s, attempt %s', str(e), retries)
-        retries += 1
-        if retries >= max_retries:
-          raise HdfsError('Exceeded maximum number of retries afeter %s attemps, failing.')
-        else:
-          pass
       except InvalidTokenError, e:
         if self.renewer:
           if renewed == True:
@@ -1564,12 +1576,14 @@ class TokenWebHDFSClient(WebHDFSClient):
             raise HdfsError('Could not renew Delegation Token ' % e2)
         else:
           raise e
-
     raise HdfsError('Inexpected Process End.')
 
     def get_authenticated_user(self):
-      # There is no way to fetch who is the authenticated user with token.
-      return None
+      if self.created_token:
+        return self.renewer.get_authenticated_user()
+      else:
+        # There is no way to fetch who is the authenticated user with token.
+        return None
 
 # Helpers
 # -------
