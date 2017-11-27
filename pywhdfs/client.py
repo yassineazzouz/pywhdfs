@@ -101,6 +101,9 @@ class WebHDFSClient(object):
     self.host_list = SyncHostsList(nameservices)
     self.root = root
 
+    self.max_fail_retries = 10
+    self.on_fail_delay = 6 # Seconds
+
     self._session = session or rq.Session()
     # Use a bigger connection pool due to the big number of concurrent threads 
     adapter = rq.adapters.HTTPAdapter(max_retries=5, pool_connections=pool_connections, pool_maxsize=pool_connections)
@@ -111,7 +114,10 @@ class WebHDFSClient(object):
     if self.max_concurrency > 0:
       self._lock = Lock()
       self._sem = Semaphore(int(self.max_concurrency))
-      self._timestamp = time.time() - self._delay
+      # ensure there is a least _concurency_delay time difference between
+      # two consecutive requests, avoid flooding the namenode/datanode with requests
+      self._concurency_delay = 0.001 # Seconds.
+      self._timestamp = time.time() - self._concurency_delay
 
     if proxy:
       if not self._session.params:
@@ -232,13 +238,7 @@ class WebHDFSClient(object):
         _logger.debug('Ignoring Remote Exception for %s request on url %s : %s', response.request.method ,response.url, str(message))
         return response
 
-    max_retries = 10
     retries = 0
-    _failure_delay = 6 # Seconds
-    # ensure there is a least _concurency_delay time difference between
-    # two consecutive requests, avoid flooding the namenode/datanode with requests
-    _concurency_delay = 0.001 # Seconds.
-
     while True:
       if self.max_concurrency > 0:
         # Control the number of parallel requests
@@ -275,11 +275,11 @@ class WebHDFSClient(object):
         except (HdfsTimeoutError, RecoveryInProgressError, AlreadyBeingCreatedError, HdfsIOError) as e:
           _logger.warn('Request failed %s', str(e))
           retries += 1
-          if retries >= max_retries:
+          if retries >= self.max_fail_retries:
             raise HdfsError('Exceeded maximum number of retries after %s attemps, failing.')
           else:
-            _logger.warn('Retrying failed request, attempt %s of %s', retries, max_retries)
-            time.sleep(_failure_delay)
+            _logger.warn('Retrying failed request, attempt %s of %s', retries, self.max_fail_retries)
+            time.sleep(self.on_fail_delay)
             pass
       else:
         _logger.debug('%s request on url %s returned with status %s', method ,url, response.status_code)
