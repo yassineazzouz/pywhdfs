@@ -23,35 +23,43 @@ class HdfsError(Exception):
   def __init__(self, message, *args):
     super(HdfsError, self).__init__(message % args if args else message)
 
-class StandbyError(HdfsError):
-  """StandBy error class, is a subclass of HdfsError thrown when the namenode is not in active State.
+class AuthenticationError(HdfsError):
+    #403 return code
+  def __init__(self, message, *args):
+    super(AuthenticationError, self).__init__(message % args if args else message)
 
-  :param message: Error message.
-  :param args: optional Message formatting arguments.
+class HdfsTimeoutError(HdfsError):
+  def __init__(self, message, *args):
+    super(HdfsTimeoutError, self).__init__(message % args if args else message)
 
-  """
+class ForbiddenRequestError(HdfsError):
+    #403 return code
+  def __init__(self, message, *args):
+    super(ForbiddenRequestError, self).__init__(message % args if args else message)
+
+class StandbyError(ForbiddenRequestError):
   def __init__(self, message, *args):
     super(StandbyError, self).__init__(message % args if args else message)
 
-class InvalidTokenError(HdfsError):
-  """InvalidToken error class, is a subclass of HdfsError thrown when the authentication token is invalid.
+class SecurityError(ForbiddenRequestError):
+  def __init__(self, message, *args):
+    super(SecurityError, self).__init__(message % args if args else message)
 
-  :param message: Error message.
-  :param args: optional Message formatting arguments.
-
-  """
+class InvalidTokenError(ForbiddenRequestError):
   def __init__(self, message, *args):
     super(InvalidTokenError, self).__init__(message % args if args else message)
 
-class TimeoutError(HdfsError):
-  """TimeoutError error class, is a subclass of HdfsError thrown when the server or client timeout.
-
-  :param message: Error message.
-  :param args: optional Message formatting arguments.
-
-  """
+class RecoveryInProgressError(ForbiddenRequestError):
   def __init__(self, message, *args):
-    super(TimeoutError, self).__init__(message % args if args else message)
+    super(RecoveryInProgressError, self).__init__(message % args if args else message)
+
+class AlreadyBeingCreatedError(ForbiddenRequestError):
+  def __init__(self, message, *args):
+    super(AlreadyBeingCreatedException, self).__init__(message % args if args else message)
+
+class HdfsIOError(ForbiddenRequestError):
+  def __init__(self, message, *args):
+    super(HdfsIOError, self).__init__(message % args if args else message)
 
 class FederationError(HdfsError):
   """Federation error class, is a subclass of HdfsError thrown when not suitable mount point is found.

@@ -88,7 +88,7 @@ class WebHDFSClient(object):
            self,
            nameservices,
            max_concurrency=-1,
-           pool_connections=100,
+           pool_connections=60,
            root=None,
            proxy=None,
            timeout=None,
@@ -111,6 +111,7 @@ class WebHDFSClient(object):
     if self.max_concurrency > 0:
       self._lock = Lock()
       self._sem = Semaphore(int(self.max_concurrency))
+      self._timestamp = time() - self._delay
 
     if proxy:
       if not self._session.params:
@@ -187,40 +188,67 @@ class WebHDFSClient(object):
 
       if response.status_code == httplib.UNAUTHORIZED:
         _logger.error('Authentication Failure.')
-        raise HdfsError('Authentication failure. Check your credentials.')
+        raise AuthenticationError('Authentication failure. Check your credentials.')
 
       if response.status_code == httplib.REQUEST_TIMEOUT or response.status_code == httplib.GATEWAY_TIMEOUT:
-        raise TimeoutError("TimeoutException : %r",message)
+        _logger.warn('Failed %s request on url %s returned with status %s, Remote Exception : %s, Message: %s', response.request.method ,response.url, response.status_code, str(exception), str(message))
+        raise HdfsTimeoutError("TimeoutException : %r",message)
 
       if response.status_code == httplib.FORBIDDEN:
+        _logger.warn('Failed %s request on url %s returned with status %s, Remote Exception : %s, Message: %s', response.request.method ,response.url, response.status_code, str(exception), str(message))
         if exception == "SecurityException":
           _logger.warn('Delegation token expired')
           if "InvalidToken" in message:
-            raise InvalidTokenError("InvalidTokenException : %r",message)   
+            raise InvalidTokenError("InvalidTokenException : %r",message)
+          else:
+            raise SecurityError("SecurityError : %r",message)
           # else it is something else    
         elif exception == "StandbyException":
-          _logger.info('Request returned Standby Exception on url %s.', response.url)
+          _logger.warn('Request returned Standby Exception on url %s.', response.url)
           raise StandbyError("StandbyException : %r",message)
+        elif exception == "AlreadyBeingCreatedException":
+          _logger.warn('Request returned AlreadyBeingCreatedError on url %s.', response.url)
+          raise AlreadyBeingCreatedError("AlreadyBeingCreatedError : %r",message)
+        elif exception == "RecoveryInProgressException":
+          _logger.warn('Request returned RecoveryInProgressError on url %s.', response.url)
+          raise RecoveryInProgressError("RecoveryInProgressError : %r",message)
+        elif exception == "IOException":
+          _logger.warn('Request returned HdfsIOError on url %s.', response.url)
+          if "SocketTimeout" in str(message):
+             raise HdfsTimeoutError("TimeoutException : %r",message)
+          raise HdfsIOError("HdfsIOError : %r",message)
         else:
           # resolve the exception based on message, if the exception
           # is unknown
           if "SocketTimeout" in str(message):
-            raise TimeoutError("TimeoutException : %r",message)
+            raise HdfsTimeoutError("TimeoutException : %r",message)
+          if strict:
+            raise ForbiddenRequestError("ForbiddenException : %r",message)
 
       if strict:
-        _logger.error('%s request on url %s returned with status %s, Remote Exception : %s, Message: %s', response.request.method ,response.url, response.status_code, str(exception), str(message))
-        _logger.error('Received response : %s', str(response.content))
+        _logger.error('Failed %s request on url %s returned with status %s, Remote Exception : %s, Message: %s', response.request.method ,response.url, response.status_code, str(exception), str(message))
         raise HdfsError(message)
       else:
         _logger.debug('Ignoring Remote Exception for %s request on url %s : %s', response.request.method ,response.url, str(message))
         return response
 
-    max_retries = 5
+    max_retries = 10
     retries = 0
+    _failure_delay = 6 # Seconds
+    # ensure there is a least _concurency_delay time difference between
+    # two consecutive requests, avoid flooding the namenode/datanode with requests
+    _concurency_delay = 0.001 # Seconds.
+
     while True:
       if self.max_concurrency > 0:
         # Control the number of parallel requests
         with self._sem:
+          with self._lock:
+            # the current time need to exceed the last query time + a delay
+            delay = self._timestamp + self._concurency_delay - time()
+            if delay > 0:
+              sleep(delay) # Avoid replay errors.
+              self._timestamp = time() # last request time
           response = self._session.request(
             method=method,
             url=url,
@@ -239,19 +267,22 @@ class WebHDFSClient(object):
           **rqargs
         )
 
-      _logger.debug('%s request on url %s returned with status %s', method ,url, response.status_code)     
       # returns True if status_code is less than 400
       if not response:
         try:
           return _on_fail(response=response,strict=strict)
-        except TimeoutError, e:
-          _logger.error('Request timeout %s, attempt %s of %s', str(e), retries, max_retries)
+        # recoverable errors
+        except (HdfsTimeoutError, RecoveryInProgressError, AlreadyBeingCreatedError, HdfsIOError) as e:
+          _logger.warn('Request failed %s', str(e))
           retries += 1
           if retries >= max_retries:
-            raise HdfsError('Exceeded maximum number of retries afeter %s attemps, failing.')
+            raise HdfsError('Exceeded maximum number of retries after %s attemps, failing.')
           else:
+            _logger.warn('Retrying failed request, attempt %s of %s', retries, max_retries)
+            time.sleep(_failure_delay)
             pass
       else:
+        _logger.debug('%s request on url %s returned with status %s', method ,url, response.status_code)
         return response
 
   def help(self):
