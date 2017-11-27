@@ -111,7 +111,7 @@ class WebHDFSClient(object):
     if self.max_concurrency > 0:
       self._lock = Lock()
       self._sem = Semaphore(int(self.max_concurrency))
-      self._timestamp = time() - self._delay
+      self._timestamp = time.time() - self._delay
 
     if proxy:
       if not self._session.params:
@@ -245,10 +245,10 @@ class WebHDFSClient(object):
         with self._sem:
           with self._lock:
             # the current time need to exceed the last query time + a delay
-            delay = self._timestamp + self._concurency_delay - time()
+            delay = self._timestamp + self._concurency_delay - time.time()
             if delay > 0:
-              sleep(delay) # Avoid replay errors.
-              self._timestamp = time() # last request time
+              time.sleep(delay) # Avoid replay errors.
+              self._timestamp = time.time() # last request time
           response = self._session.request(
             method=method,
             url=url,
