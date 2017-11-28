@@ -1114,7 +1114,7 @@ class WebHDFSClient(object):
     )
 
   def upload(self, hdfs_path, local_path, overwrite=False, n_threads=1, preserve=False, checksum=True,
-    temp_dir=None, chunk_size=2 ** 16, progress=None, include_pattern=None, files_only=False, **kwargs):
+    temp_dir=None, chunk_size=2 ** 16, progress=None, include_pattern="*", files_only=False, min_size=0, **kwargs):
     """Upload a file or directory to HDFS.
 
     :param hdfs_path: Target HDFS path. If it already exists and is a
@@ -1339,11 +1339,9 @@ class WebHDFSClient(object):
         local_fpaths = []
         for dpath, _, fpaths in os.walk(upload_tuple['local_path']):
           for fpath in fpaths:
-            if include_pattern:
-              if fnmatch.fnmatch(fpath, include_pattern):
+            if fnmatch.fnmatch(fpath, include_pattern):
+              if osp.getsize(osp.join(dpath, fpath)) >= min_size:
                 local_fpaths.append(osp.join(dpath, fpath))
-            else:
-              local_fpaths.append(osp.join(dpath, fpath))
 
         if files_only == False:
           offset = len(upload_tuple['local_path'].rstrip(os.sep)) + len(os.sep)
