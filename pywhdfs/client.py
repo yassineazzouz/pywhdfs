@@ -208,7 +208,10 @@ class WebHDFSClient(object):
             raise InvalidTokenError("InvalidTokenException : %r",message)
           else:
             raise SecurityError("SecurityError : %r",message)
-          # else it is something else    
+          # else it is something else
+        elif exception == "InvalidToken":
+          _logger.warn('Delegation token expired')
+          raise InvalidTokenError("InvalidTokenException : %r",message)  
         elif exception == "StandbyException":
           _logger.warn('Request returned Standby Exception on url %s.', response.url)
           raise StandbyError("StandbyException : %r",message)
