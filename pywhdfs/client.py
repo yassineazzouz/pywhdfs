@@ -1340,7 +1340,7 @@ class WebHDFSClient(object):
         for dpath, _, fpaths in os.walk(upload_tuple['local_path']):
           for fpath in fpaths:
             if fnmatch.fnmatch(fpath, include_pattern):
-              if osp.getsize(osp.join(dpath, fpath)) >= min_size:
+              if osp.getsize(osp.join(dpath, fpath)) >= int(min_size):
                 local_fpaths.append(osp.join(dpath, fpath))
 
         if files_only == False:
