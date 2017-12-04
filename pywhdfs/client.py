@@ -15,6 +15,7 @@ import logging as lg
 import itertools as it
 import glob
 import fnmatch
+import re
 import time
 import stat
 import grp
@@ -188,7 +189,7 @@ class WebHDFSClient(object):
         # No clear one thing to display, display entire message content
         message = response.content
       try:
-        exception = response.json()["RemoteException"]["exception"]
+        exception = str(response.json()["RemoteException"]["exception"])
       except ValueError:
         exception = ""
 
@@ -231,9 +232,11 @@ class WebHDFSClient(object):
           # is unknown
           if "SocketTimeout" in str(message):
             raise HdfsTimeoutError("TimeoutException : %r",message)
+          elif re.match("token .* is expired",str(message)):
+            _logger.warn('Delegation token expired')
+            raise InvalidTokenError("InvalidTokenException : %r",str(message))
           if strict:
             raise ForbiddenRequestError("ForbiddenException : %r",message)
-
       if strict:
         _logger.error('Failed %s request on url %s returned with status %s, Remote Exception : %s, Message: %s', response.request.method ,response.url, response.status_code, str(exception), str(message))
         raise HdfsError(message)
