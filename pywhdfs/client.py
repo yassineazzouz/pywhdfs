@@ -211,7 +211,7 @@ class WebHDFSClient(object):
           # else it is something else
         elif exception == "InvalidToken":
           _logger.warn('Delegation token expired')
-          raise InvalidTokenError("InvalidTokenException : %r",message)  
+          raise InvalidTokenError("InvalidTokenException : %r",message)
         elif exception == "StandbyException":
           _logger.warn('Request returned Standby Exception on url %s.', response.url)
           raise StandbyError("StandbyException : %r",message)
@@ -1570,6 +1570,7 @@ class KrbTokenWebHDFSClient(WebHDFSClient):
     """Wrapper function."""
     max_attemps = self.host_list.get_host_count(hdfs_path)
     attempt = 0
+    renew_attempted = False
 
     while True:
       host = self.host_list.get_active_host(hdfs_path)
@@ -1598,16 +1599,14 @@ class KrbTokenWebHDFSClient(WebHDFSClient):
         else:
           pass
       except InvalidTokenError, e:
-        if self.renewer:
-          if renewed == True:
-            raise HdfsError('Could not renew Delegation Token ' % e)
-          try:
-            self.renewer.renewDelegationToken(token=self.token)
-            renewed = True
-          except Exception, e2:
-            raise HdfsError('Could not renew Delegation Token ' % e2)
-        else:
-          raise e
+        if renew_attempted == True:
+          raise HdfsError('Could not renew Delegation Token ' % e)
+        try:
+          _logger.info('Renewing delegation token.')
+          self.renewer.renewDelegationToken(token=self.token)
+          renew_attempted = True
+        except Exception, e2:
+          raise HdfsError('Could not renew Delegation Token ' % e2)
     raise HdfsError('Inexpected Process End.')
 
     def get_authenticated_user(self):
