@@ -1492,7 +1492,7 @@ class InsecureWebHDFSClient(WebHDFSClient):
     session = kwargs.setdefault('session', rq.Session())
     if not session.params:
       session.params = {}
-    session.params['user.name'] = user
+    session.params['user.name'] = self.user
     super(InsecureWebHDFSClient, self).__init__(nameservices, **kwargs)
 
   def get_authenticated_user(self):
