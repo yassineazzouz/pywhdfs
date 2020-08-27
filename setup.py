@@ -24,7 +24,7 @@ def _get_version():
 
 def _get_long_description():
   """Get README contents."""
-  with open('README.md') as reader:
+  with open('README') as reader:
     return reader.read()
 
 setup(
@@ -60,4 +60,5 @@ setup(
   entry_points={'console_scripts': 
      [ 'pywhdfs = pywhdfs.cmdtool:main' ]
   },
+  long_description_content_type='text/markdown'
 )
