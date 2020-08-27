@@ -24,7 +24,7 @@ def _get_version():
 
 def _get_long_description():
   """Get README contents."""
-  with open('README') as reader:
+  with open('README.md') as reader:
     return reader.read()
 
 setup(
