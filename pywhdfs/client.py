@@ -34,7 +34,7 @@ except ImportError:  # pragma: no cover
     import httplib
 
 try:
-    import krbV
+    import gssapi
     import requests_kerberos
     from requests_kerberos import HTTPKerberosAuth
     KRB_LIB_IMPORT=True
@@ -1513,12 +1513,11 @@ class KrbWebHDFSClient(WebHDFSClient):
         _mutual_auth = mutual_auth
     session.auth = HTTPKerberosAuth(_mutual_auth)
 
-    # get the authenticated user
-    ctx = krbV.default_context()
-    cc = ctx.default_ccache()
     try:
-      self.principal = cc.principal().name
-    except krbV.Krb5Error, e:
+      # get the authenticated user
+      cred = gssapi.Credentials(usage='initiate')
+      self.principal = str(cred.name)
+    except Exception, e:
       raise HdfsError('Could not find any valid ticket in cache, %s', e)
 
     super(KrbWebHDFSClient, self).__init__(nameservices, **kwargs)
