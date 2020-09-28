@@ -27,7 +27,7 @@ class WebHDFSConfig(object):
       if osp.exists(self.path):
         try:
           self.config = json.loads(open(self.path).read())
-          self.schema = json.loads(resource_string(__name__, 'resources/config_schema.json'))
+          self.schema = json.loads(resource_string(__name__, 'resources/config_schema.json').decode('utf-8'))
           #self.schema = open("resources/schema.config").read()
           try:
             js.validate(self.config, self.schema)
@@ -36,7 +36,7 @@ class WebHDFSConfig(object):
           except js.SchemaError as e:
             print(e)
 
-        except ParsingError:
+        except Exception:
           raise HdfsError('Invalid configuration file %r.', self.path)
 
         _logger.info('Instantiated configuration from %r.', self.path)
