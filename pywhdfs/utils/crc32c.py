@@ -572,61 +572,61 @@ class crc32c(object):
     localCrc = self.crcValue
 
     while(length > 7):
-      print localCrc
+      print(localCrc)
       c0 =(buf[off+0] ^ localCrc) & 0xff
-      print localCrc
+      print(localCrc)
       localCrc = rshift(localCrc, 8)
       c1 =(buf[off+1] ^ localCrc) & 0xff
-      print localCrc
+      print(localCrc)
       localCrc = rshift(localCrc, 8)
       c2 =(buf[off+2] ^ localCrc) & 0xff
-      print localCrc
+      print(localCrc)
       localCrc = rshift(localCrc, 8)
       c3 =(buf[off+3] ^ localCrc) & 0xff
-      print localCrc
+      print(localCrc)
       localCrc = (T[T8_7_start + c0] ^ T[T8_6_start + c1]) ^ (T[T8_5_start + c2] ^ T[T8_4_start + c3])
-      print localCrc
+      print(localCrc)
       c4 = buf[off+4] & 0xff
       c5 = buf[off+5] & 0xff
       c6 = buf[off+6] & 0xff
       c7 = buf[off+7] & 0xff
 
       localCrc ^= (T[T8_3_start + c4] ^ T[T8_2_start + c5]) ^ (T[T8_1_start + c6] ^ T[T8_0_start + c7])
-      print localCrc
+      print(localCrc)
       off += 8
       length -= 8
 
-    print length
+    print(length)
     if length >= 7:
         localCrc = rshift(localCrc, 8) ^ T[T8_0_start + ((localCrc ^ buf[off]) & 0xff)]
         off += 1
-        print localCrc
+        print(localCrc)
     if length >= 6:
         localCrc = rshift(localCrc, 8) ^ T[T8_0_start + ((localCrc ^ buf[off]) & 0xff)]
         off += 1
-        print localCrc
+        print(localCrc)
     if length >= 5:
         localCrc = rshift(localCrc, 8) ^ T[T8_0_start + ((localCrc ^ buf[off]) & 0xff)]
         off += 1
-        print localCrc
+        print(localCrc)
     if length >= 4:
         localCrc = rshift(localCrc, 8) ^ T[T8_0_start + ((localCrc ^ buf[off]) & 0xff)]
         off += 1
-        print localCrc
+        print(localCrc)
     if length >= 3:
         localCrc = rshift(localCrc, 8) ^ T[T8_0_start + ((localCrc ^ buf[off]) & 0xff)]
         off += 1
-        print localCrc
+        print(localCrc)
     if length >= 2:
         localCrc = rshift(localCrc, 8) ^ T[T8_0_start + ((localCrc ^ buf[off]) & 0xff)]
         off += 1
-        print localCrc
+        print(localCrc)
     if length >= 1:
         localCrc = rshift(localCrc, 8) ^ T[T8_0_start + ((localCrc ^ buf[off]) & 0xff)]
         off += 1
-        print localCrc
+        print(localCrc)
 
-    print "here : %i" % localCrc
+    print("here : %i" % localCrc)
     self.crcValue = localCrc
 
   def update_int(self, data):

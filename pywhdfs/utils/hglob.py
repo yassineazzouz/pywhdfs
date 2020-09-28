@@ -6,14 +6,6 @@ import re
 import fnmatch
 from .utils import HdfsError
 
-try:
-    _unicode = unicode
-except NameError:
-    # If Python is built without Unicode support, the unicode type
-    # will not exist. Fake one.
-    class _unicode(object):
-        pass
-
 __all__ = ["glob", "iglob"]
 
 def glob(client, pathname):
@@ -73,16 +65,18 @@ def iglob(client, pathname):
 
 def glob1(client, dirname, pattern):
     if not dirname:
-        dirname = os.curdir
-    if isinstance(pattern, _unicode) and not isinstance(dirname, unicode):
-        dirname = unicode(dirname, sys.getfilesystemencoding() or
-                                   sys.getdefaultencoding())
+        if isinstance(pattern, bytes):
+            dirname = bytes(os.curdir, 'ASCII')
+        else:
+            dirname = os.curdir
     try:
         names = client.list(dirname)
     except HdfsError:
         return []
-    if pattern[0] != '.':
-        names = filter(lambda x: x[0] != '.', names)
+
+    if not _ishidden(pattern):
+        names = [x for x in names if not _ishidden(x)]
+
     return fnmatch.filter(names, pattern)
 
 def glob0(client, dirname, basename):
@@ -103,3 +97,6 @@ magic_check = re.compile('[*?[]')
 
 def has_magic(s):
     return magic_check.search(s) is not None
+
+def _ishidden(path):
+    return path[0] in ('.', b'.'[0])

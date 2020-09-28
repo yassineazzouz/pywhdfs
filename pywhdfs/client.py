@@ -162,7 +162,7 @@ class WebHDFSClient(object):
         )
         return response
       ## Handle stanby failover
-      except StandbyError, e:
+      except StandbyError as e:
         _logger.warn('Namenode %s in standby mode. %s', host, str(e))
         self.host_list.switch_active_host(host,hdfs_path)
         attempt += 1
@@ -598,20 +598,20 @@ class WebHDFSClient(object):
     _logger.debug('Setting extended attribute %r for path %r.', key , hdfs_path)
     try:
       self._api_request(method='PUT', hdfs_path=hdfs_path,  params={'op': 'SETXATTR','flag': 'CREATE', 'xattr.name' : key, 'xattr.value': value})
-    except HdfsError, e:
+    except HdfsError as e:
       if "already exists" in str(e):
         _logger.debug('Looks like extended attribute %r already exist for path %r.', key , hdfs_path)
         if overwrite:
           try:
             _logger.debug('Replacing extended attribute %r value on path %r.', key , hdfs_path)
             self._api_request(method='PUT', hdfs_path=hdfs_path, params={'op': 'SETXATTR','flag': 'REPLACE', 'xattr.name' : key, 'xattr.value': value})
-          except Exception, e:
+          except Exception as e:
             raise e
         else:
           raise e
       else:
         raise e
-    except Exception, e:
+    except Exception as e:
       raise e
     return True
 
@@ -646,13 +646,13 @@ class WebHDFSClient(object):
     try:
       res = self._api_request(method='GET', hdfs_path="/", params={'op': 'GETDELEGATIONTOKENS', 'renewer': renewer})
       return res.json()['Tokens'] if res else None
-    except HdfsError, e:
+    except HdfsError as e:
       if "Invalid value for webhdfs parameter" in str(e):
         _logger.error('There is a webhdfs bug in GETDELEGATIONTOKENS operation, hopefully this will be fixed in future releases.')
         return None
       else:
         raise e
-    except Exception, e:
+    except Exception as e:
       raise e
 
   def getDelegationToken(self, renewer, service=None, kind=None):
@@ -682,7 +682,7 @@ class WebHDFSClient(object):
     access = True
     try:
       res = self._api_request(method='GET', hdfs_path=hdfs_path, strict=strict, params={'op': 'CHECKACCESS'})
-    except HdfsError, e:
+    except HdfsError as e:
       if 'Permission denied:' %path in str(e):
         access = False
       else:
@@ -1291,7 +1291,7 @@ class WebHDFSClient(object):
           # check if parent exist
           try:
             pstatus = self.status(osp.dirname(hdfs_path),strict=True)
-          except HdfsError, err:
+          except HdfsError as err:
             raise HdfsError('Parent directory of %r does not exist.', hdfs_path)
           else:
             # Remote path does not exist, and parent exist
@@ -1458,13 +1458,13 @@ class WebHDFSClient(object):
         if quota == "-1" :
             try:
                 call("hdfs dfsadmin -clrQuota %s" % path, shell=True)
-            except Exception, e:
+            except Exception as e:
                 raise HdfsError(str(e))
         else:
             try:
                 # I don't know why this seems to work only this way
                 call("hdfs dfsadmin -setQuota %s %s" % (quota, path), shell=True)
-            except Exception, e:
+            except Exception as e:
                 raise HdfsError(str(e))
         return True
 
@@ -1475,12 +1475,12 @@ class WebHDFSClient(object):
         if quota == "-1" :
             try:
                 call("hdfs dfsadmin -clrSpaceQuota %s" % path, shell=True)
-            except Exception, e:
+            except Exception as e:
                 raise HdfsError(str(e))
         else:
             try:
                 call("hdfs dfsadmin -setSpaceQuota %s %s" % (quota, path), shell=True)
-            except Exception, e:
+            except Exception as e:
                 raise HdfsError(str(e))
         return True
 
@@ -1517,7 +1517,7 @@ class KrbWebHDFSClient(WebHDFSClient):
       # get the authenticated user
       cred = gssapi.Credentials(usage='initiate')
       self.principal = str(cred.name)
-    except Exception, e:
+    except Exception as e:
       raise HdfsError('Could not find any valid ticket in cache, %s', e)
 
     super(KrbWebHDFSClient, self).__init__(nameservices, **kwargs)
@@ -1548,14 +1548,14 @@ class KrbTokenWebHDFSClient(WebHDFSClient):
       # try to create a renewer
       try:
         self.renewer = KrbWebHDFSClient( nameservices=nameservices, mutual_auth=mutual_auth, **kwargs)
-      except HdfsError, e:
+      except HdfsError as e:
         _logger.error('Could not create a token renewer: %s',str(e))
         raise e
       # try to create a token
       try:
         _logger.info('Create delegation token, for user %s', self.renewer.get_authenticated_user())
         self.token = self.renewer.getDelegationToken(renewer=self.renewer.get_authenticated_user())['urlString']
-      except HdfsError, e:
+      except HdfsError as e:
         _logger.error('Could not create a delegation token, %s', str(e))
         raise e
       session.params['delegation'] = self.token
@@ -1565,7 +1565,7 @@ class KrbTokenWebHDFSClient(WebHDFSClient):
     try:
       _logger.info('Cleanup created delegation token.')
       self.renewer.cancelDelegationToken(token=self.token)
-    except HdfsError, e:
+    except HdfsError as e:
       _logger.error('Could not cancel delegation token : %s', str(e))
 
   def _api_request(self, method, params, hdfs_path, data=None, strict=True, **rqargs):
@@ -1592,7 +1592,7 @@ class KrbTokenWebHDFSClient(WebHDFSClient):
         )
         return response
       ## Handle stanby failover
-      except StandbyError, e:
+      except StandbyError as e:
         _logger.warn('Namenode %s in standby mode. %s', host, str(e))
         self.host_list.switch_active_host(host,hdfs_path)
         attempt += 1
@@ -1600,14 +1600,14 @@ class KrbTokenWebHDFSClient(WebHDFSClient):
           raise HdfsError('Could not find any active namenode.')
         else:
           pass
-      except InvalidTokenError, e:
+      except InvalidTokenError as e:
         if renew_attempted == True:
           raise HdfsError('Could not renew Delegation Token ' % e)
         try:
           _logger.info('Renewing delegation token.')
           self.renewer.renewDelegationToken(token=self.token)
           renew_attempted = True
-        except Exception, e2:
+        except Exception as e2:
           raise HdfsError('Could not renew Delegation Token ' % e2)
     raise HdfsError('Inexpected Process End.')
 

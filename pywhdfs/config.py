@@ -32,9 +32,9 @@ class WebHDFSConfig(object):
           try:
             js.validate(self.config, self.schema)
           except js.ValidationError as e:
-            print e.message
+            print(e.message)
           except js.SchemaError as e:
-            print e
+            print(e)
 
         except ParsingError:
           raise HdfsError('Invalid configuration file %r.', self.path)
