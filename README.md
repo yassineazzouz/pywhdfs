@@ -38,6 +38,10 @@ Getting started
   $ easy_install pywhdfs
 ```
 
+Some dependencies require the following packages to be also installed :
+- krb5-devel krb5-libs
+- gcc
+- python-devel
 
 Configuration
 ---------------
