@@ -48,6 +48,9 @@ setup(
     'Programming Language :: Python :: 2.7',
     'Programming Language :: Python :: 3.3',
     'Programming Language :: Python :: 3.4',
+    'Programming Language :: Python :: 3.6',
+    'Programming Language :: Python :: 3.7',
+    'Programming Language :: Python :: 3.8'
   ],
   install_requires=[
     'docopt',
@@ -55,7 +58,8 @@ setup(
     'jsonschema>=2.0',
     'requests-kerberos>=0.7.0',
     'pykerberos',
-    'gssapi<=1.2.0'
+    'gssapi<=1.2.0; python_version < "3.0.0"',
+    'gssapi>1.2.0; python_version >= "3.0.0"',
   ],
   entry_points={'console_scripts': 
      [ 'pywhdfs = pywhdfs.cmdtool:main' ]
