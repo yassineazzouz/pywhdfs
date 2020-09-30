@@ -58,7 +58,7 @@ setup(
     'jsonschema>=2.0',
     'requests-kerberos>=0.7.0',
     'pykerberos',
-    'gssapi<=1.2.0' if sys.version_info[0] < 3 else 'gssapi>1.2.0'
+    'gssapi<=1.2.0' if sys.version_info[0] < 3 else "gssapi>1.2.0,<=1.6.0",
   ],
   entry_points={'console_scripts': 
      [ 'pywhdfs = pywhdfs.cmdtool:main' ]
